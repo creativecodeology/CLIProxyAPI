@@ -152,7 +152,9 @@ func InArray(hystack []string, needle string) bool {
 	return false
 }
 
-// HideAPIKey obscures an API key for logging purposes, showing only the first and last few characters.
+// HideAPIKey obscures an API key for logging purposes, showing only minimal characters.
+// Security: Shows only 2 characters on each end to minimize information leakage
+// while still allowing identification of which key is being used.
 //
 // Parameters:
 //   - apiKey: The API key to hide.
@@ -160,14 +162,15 @@ func InArray(hystack []string, needle string) bool {
 // Returns:
 //   - string: The obscured API key.
 func HideAPIKey(apiKey string) string {
-	if len(apiKey) > 8 {
-		return apiKey[:4] + "..." + apiKey[len(apiKey)-4:]
-	} else if len(apiKey) > 4 {
-		return apiKey[:2] + "..." + apiKey[len(apiKey)-2:]
-	} else if len(apiKey) > 2 {
-		return apiKey[:1] + "..." + apiKey[len(apiKey)-1:]
+	if len(apiKey) > 6 {
+		// Security: Reduced from 4+4 to 2+2 characters visible
+		return apiKey[:2] + "****" + apiKey[len(apiKey)-2:]
+	} else if len(apiKey) > 3 {
+		return apiKey[:1] + "****" + apiKey[len(apiKey)-1:]
+	} else if len(apiKey) > 1 {
+		return apiKey[:1] + "****"
 	}
-	return apiKey
+	return "****"
 }
 
 // maskAuthorizationHeader masks the Authorization header value while preserving the auth type prefix.
@@ -266,4 +269,27 @@ func shouldMaskQueryParam(key string) bool {
 		return true
 	}
 	return false
+}
+
+// RedactEmail redacts an email address for privacy-safe logging.
+// It preserves only the first character and domain for debugging purposes.
+// Example: "user@example.com" -> "u***@example.com"
+func RedactEmail(email string) string {
+	if email == "" {
+		return ""
+	}
+	parts := strings.SplitN(email, "@", 2)
+	if len(parts) != 2 {
+		// Not a valid email format, just mask it
+		if len(email) > 2 {
+			return email[:1] + "***"
+		}
+		return "***"
+	}
+	localPart := parts[0]
+	domain := parts[1]
+	if len(localPart) > 0 {
+		return localPart[:1] + "***@" + domain
+	}
+	return "***@" + domain
 }

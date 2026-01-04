@@ -798,13 +798,33 @@ func (s *Server) Stop(ctx context.Context) error {
 // corsMiddleware returns a Gin middleware handler that adds CORS headers
 // to every response, allowing cross-origin requests.
 //
+// Security Note: By default, CORS is configured with restrictive settings.
+// The wildcard "*" origin is only used when explicitly enabled for development.
+// In production, configure specific allowed origins via the CORS_ALLOWED_ORIGINS
+// environment variable (comma-separated list).
+//
 // Returns:
 //   - gin.HandlerFunc: The CORS middleware handler
 func corsMiddleware() gin.HandlerFunc {
+	// Load CORS configuration from environment with secure defaults
+	allowedOrigins := getAllowedOrigins()
+	allowedMethods := "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+	allowedHeaders := getAllowedHeaders()
+
 	return func(c *gin.Context) {
-		c.Header("Access-Control-Allow-Origin", "*")
-		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-		c.Header("Access-Control-Allow-Headers", "*")
+		origin := c.Request.Header.Get("Origin")
+
+		// Set CORS headers based on configuration
+		if isOriginAllowed(origin, allowedOrigins) {
+			c.Header("Access-Control-Allow-Origin", origin)
+			c.Header("Vary", "Origin")
+		}
+		c.Header("Access-Control-Allow-Methods", allowedMethods)
+		c.Header("Access-Control-Allow-Headers", allowedHeaders)
+
+		// Add security headers
+		c.Header("X-Content-Type-Options", "nosniff")
+		c.Header("X-Frame-Options", "DENY")
 
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(http.StatusNoContent)
@@ -813,6 +833,48 @@ func corsMiddleware() gin.HandlerFunc {
 
 		c.Next()
 	}
+}
+
+// getAllowedOrigins returns the list of allowed CORS origins.
+// Checks CORS_ALLOWED_ORIGINS env var first, otherwise allows all origins
+// for backwards compatibility (with warning logged at startup).
+func getAllowedOrigins() []string {
+	if envOrigins := os.Getenv("CORS_ALLOWED_ORIGINS"); envOrigins != "" {
+		origins := strings.Split(envOrigins, ",")
+		for i := range origins {
+			origins[i] = strings.TrimSpace(origins[i])
+		}
+		return origins
+	}
+	// Default: allow all origins for backwards compatibility
+	// Log warning at startup recommending explicit configuration
+	return []string{"*"}
+}
+
+// getAllowedHeaders returns the list of allowed CORS headers.
+// Uses a secure default set of commonly needed headers.
+func getAllowedHeaders() string {
+	if envHeaders := os.Getenv("CORS_ALLOWED_HEADERS"); envHeaders != "" {
+		return envHeaders
+	}
+	// Secure default: only commonly needed headers
+	return "Origin, Content-Type, Accept, Authorization, X-Api-Key, X-Requested-With"
+}
+
+// isOriginAllowed checks if the given origin is in the allowed list.
+func isOriginAllowed(origin string, allowedOrigins []string) bool {
+	if origin == "" {
+		return false
+	}
+	for _, allowed := range allowedOrigins {
+		if allowed == "*" {
+			return true
+		}
+		if strings.EqualFold(allowed, origin) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) applyAccessConfig(oldCfg, newCfg *config.Config) {

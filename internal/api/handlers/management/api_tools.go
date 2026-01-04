@@ -33,6 +33,126 @@ var geminiOAuthScopes = []string{
 	"https://www.googleapis.com/auth/userinfo.profile",
 }
 
+// privateIPBlocks defines the CIDR blocks for private/reserved IP addresses.
+// These are blocked to prevent SSRF attacks to internal networks.
+var privateIPBlocks []*net.IPNet
+
+func init() {
+	// RFC1918 private address ranges
+	privateRanges := []string{
+		"127.0.0.0/8",    // Loopback
+		"10.0.0.0/8",     // Private Class A
+		"172.16.0.0/12",  // Private Class B
+		"192.168.0.0/16", // Private Class C
+		"169.254.0.0/16", // Link-local
+		"224.0.0.0/4",    // Multicast
+		"240.0.0.0/4",    // Reserved
+		"0.0.0.0/8",      // Current network
+		// IPv6 ranges
+		"::1/128",       // Loopback
+		"fc00::/7",      // Unique local
+		"fe80::/10",     // Link-local
+		"ff00::/8",      // Multicast
+		"::ffff:0:0/96", // IPv4-mapped IPv6 (for metadata service bypass prevention)
+	}
+	for _, cidr := range privateRanges {
+		_, block, err := net.ParseCIDR(cidr)
+		if err == nil {
+			privateIPBlocks = append(privateIPBlocks, block)
+		}
+	}
+}
+
+// isPrivateIP checks if an IP address is in a private/reserved range.
+// Returns true if the IP should be blocked for SSRF protection.
+func isPrivateIP(ip net.IP) bool {
+	if ip == nil {
+		return true // Treat nil as private for safety
+	}
+
+	// Check if it's a loopback address
+	if ip.IsLoopback() {
+		return true
+	}
+
+	// Check if it's a private address
+	if ip.IsPrivate() {
+		return true
+	}
+
+	// Check if it's a link-local address
+	if ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+		return true
+	}
+
+	// Check if it's a multicast address
+	if ip.IsMulticast() {
+		return true
+	}
+
+	// Check if it's an unspecified address
+	if ip.IsUnspecified() {
+		return true
+	}
+
+	// Check against our block list (includes IPv4-mapped IPv6)
+	for _, block := range privateIPBlocks {
+		if block.Contains(ip) {
+			return true
+		}
+	}
+
+	// Special case: Check for IPv4-mapped IPv6 addresses
+	// These can be used to bypass IPv4 private IP checks
+	if ip4 := ip.To4(); ip4 != nil {
+		return isPrivateIP(ip4)
+	}
+
+	return false
+}
+
+// validateURLForSSRF checks if a URL is safe from SSRF attacks.
+// It resolves the hostname and checks if any resolved IP is in a private range.
+// Returns an error if the URL is potentially unsafe.
+func validateURLForSSRF(urlStr string) error {
+	parsedURL, err := url.Parse(urlStr)
+	if err != nil {
+		return fmt.Errorf("invalid URL: %w", err)
+	}
+
+	// Only allow http and https schemes
+	if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
+		return fmt.Errorf("only http and https schemes are allowed")
+	}
+
+	host := parsedURL.Hostname()
+	if host == "" {
+		return fmt.Errorf("URL must have a host")
+	}
+
+	// Check if the host is an IP address directly
+	if ip := net.ParseIP(host); ip != nil {
+		if isPrivateIP(ip) {
+			return fmt.Errorf("requests to private/internal IP addresses are not allowed")
+		}
+		return nil
+	}
+
+	// Resolve the hostname to check all IP addresses
+	ips, err := net.LookupIP(host)
+	if err != nil {
+		return fmt.Errorf("failed to resolve hostname: %w", err)
+	}
+
+	for _, ip := range ips {
+		if isPrivateIP(ip) {
+			return fmt.Errorf("hostname resolves to private/internal IP address")
+		}
+	}
+
+	return nil
+}
+
 type apiCallRequest struct {
 	AuthIndexSnake  *string           `json:"auth_index"`
 	AuthIndexCamel  *string           `json:"authIndex"`
@@ -120,6 +240,13 @@ func (h *Handler) APICall(c *gin.Context) {
 	parsedURL, errParseURL := url.Parse(urlStr)
 	if errParseURL != nil || parsedURL.Scheme == "" || parsedURL.Host == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid url"})
+		return
+	}
+
+	// SSRF protection: validate that the URL doesn't point to internal/private networks
+	if err := validateURLForSSRF(urlStr); err != nil {
+		log.Warnf("APICall blocked due to SSRF protection: %v", err)
+		c.JSON(http.StatusForbidden, gin.H{"error": "URL blocked: requests to internal/private networks are not allowed"})
 		return
 	}
 

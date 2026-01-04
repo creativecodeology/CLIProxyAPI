@@ -302,7 +302,9 @@ func (e *IFlowExecutor) Refresh(ctx context.Context, auth *cliproxyauth.Auth) (*
 
 // refreshCookieBased refreshes API key using browser cookie
 func (e *IFlowExecutor) refreshCookieBased(ctx context.Context, auth *cliproxyauth.Auth, cookie, email string) (*cliproxyauth.Auth, error) {
-	log.Debugf("iflow executor: checking refresh need for cookie-based API key for user: %s", email)
+	// Privacy: Redact email address in logs to comply with data protection requirements
+	redactedEmail := util.RedactEmail(email)
+	log.Debugf("iflow executor: checking refresh need for cookie-based API key for user: %s", redactedEmail)
 
 	// Get current expiry time from metadata
 	var currentExpire string
@@ -318,11 +320,11 @@ func (e *IFlowExecutor) refreshCookieBased(ctx context.Context, auth *cliproxyau
 		log.Warnf("iflow executor: failed to check refresh need: %v", err)
 		// If we can't check, continue with refresh anyway as a safety measure
 	} else if !needsRefresh {
-		log.Debugf("iflow executor: no refresh needed for user: %s", email)
+		log.Debugf("iflow executor: no refresh needed for user: %s", redactedEmail)
 		return auth, nil
 	}
 
-	log.Infof("iflow executor: refreshing cookie-based API key for user: %s", email)
+	log.Infof("iflow executor: refreshing cookie-based API key for user: %s", redactedEmail)
 
 	svc := iflowauth.NewIFlowAuth(e.cfg)
 	keyData, err := svc.RefreshAPIKey(ctx, cookie, email)

@@ -146,11 +146,24 @@ func startCallbackForwarder(port int, provider, targetBase string) (*callbackFor
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		target := targetBase
-		if raw := r.URL.RawQuery; raw != "" {
-			if strings.Contains(target, "?") {
-				target = target + "&" + raw
-			} else {
-				target = target + "?" + raw
+		// Security: Only forward whitelisted OAuth callback parameters
+		// to prevent redirect injection attacks
+		if r.URL.RawQuery != "" {
+			query := r.URL.Query()
+			safeParams := url.Values{}
+			// Only forward standard OAuth callback parameters
+			allowedParams := []string{"code", "state", "error", "error_description", "scope"}
+			for _, param := range allowedParams {
+				if val := query.Get(param); val != "" {
+					safeParams.Set(param, val)
+				}
+			}
+			if len(safeParams) > 0 {
+				if strings.Contains(target, "?") {
+					target = target + "&" + safeParams.Encode()
+				} else {
+					target = target + "?" + safeParams.Encode()
+				}
 			}
 		}
 		w.Header().Set("Cache-Control", "no-store")
@@ -504,7 +517,15 @@ func isRuntimeOnlyAuth(auth *coreauth.Auth) bool {
 // Download single auth file by name
 func (h *Handler) DownloadAuthFile(c *gin.Context) {
 	name := c.Query("name")
-	if name == "" || strings.Contains(name, string(os.PathSeparator)) {
+	if name == "" {
+		c.JSON(400, gin.H{"error": "invalid name"})
+		return
+	}
+	// Security: Use filepath.Base to prevent path traversal attacks
+	// This strips any directory components from the filename, preventing
+	// attacks like "../../../etc/passwd" on any operating system
+	name = filepath.Base(name)
+	if name == "." || name == ".." {
 		c.JSON(400, gin.H{"error": "invalid name"})
 		return
 	}
@@ -562,7 +583,13 @@ func (h *Handler) UploadAuthFile(c *gin.Context) {
 		return
 	}
 	name := c.Query("name")
-	if name == "" || strings.Contains(name, string(os.PathSeparator)) {
+	if name == "" {
+		c.JSON(400, gin.H{"error": "invalid name"})
+		return
+	}
+	// Security: Use filepath.Base to prevent path traversal attacks
+	name = filepath.Base(name)
+	if name == "." || name == ".." {
 		c.JSON(400, gin.H{"error": "invalid name"})
 		return
 	}
@@ -575,7 +602,7 @@ func (h *Handler) UploadAuthFile(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "failed to read body"})
 		return
 	}
-	dst := filepath.Join(h.cfg.AuthDir, filepath.Base(name))
+	dst := filepath.Join(h.cfg.AuthDir, name)
 	if !filepath.IsAbs(dst) {
 		if abs, errAbs := filepath.Abs(dst); errAbs == nil {
 			dst = abs
@@ -633,11 +660,17 @@ func (h *Handler) DeleteAuthFile(c *gin.Context) {
 		return
 	}
 	name := c.Query("name")
-	if name == "" || strings.Contains(name, string(os.PathSeparator)) {
+	if name == "" {
 		c.JSON(400, gin.H{"error": "invalid name"})
 		return
 	}
-	full := filepath.Join(h.cfg.AuthDir, filepath.Base(name))
+	// Security: Use filepath.Base to prevent path traversal attacks
+	name = filepath.Base(name)
+	if name == "." || name == ".." {
+		c.JSON(400, gin.H{"error": "invalid name"})
+		return
+	}
+	full := filepath.Join(h.cfg.AuthDir, name)
 	if !filepath.IsAbs(full) {
 		if abs, errAbs := filepath.Abs(full); errAbs == nil {
 			full = abs
