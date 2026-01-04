@@ -129,12 +129,15 @@ func ConfigureLogOutput(cfg *config.Config) error {
 			_ = logWriter.Close()
 		}
 		protectedPath = filepath.Join(logDir, "main.log")
+		// Security: Set default log retention limits to prevent unbounded log growth
+		// containing potentially sensitive data. MaxBackups limits number of old files
+		// to keep, MaxAge limits days to retain old files.
 		logWriter = &lumberjack.Logger{
 			Filename:   protectedPath,
 			MaxSize:    10,
-			MaxBackups: 0,
-			MaxAge:     0,
-			Compress:   false,
+			MaxBackups: 5,  // Keep at most 5 backup files
+			MaxAge:     30, // Keep logs for at most 30 days
+			Compress:   true,
 		}
 		log.SetOutput(logWriter)
 	} else {

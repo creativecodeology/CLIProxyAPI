@@ -124,7 +124,8 @@ func (ia *IFlowAuth) doTokenRequest(ctx context.Context, req *http.Request) (*IF
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		log.Debugf("iflow token request failed: status=%d body=%s", resp.StatusCode, string(body))
+		// Security: Don't log response body as it may contain sensitive tokens
+		log.Debugf("iflow token request failed: status=%d", resp.StatusCode)
 		return nil, fmt.Errorf("iflow token: %d %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 
@@ -142,7 +143,8 @@ func (ia *IFlowAuth) doTokenRequest(ctx context.Context, req *http.Request) (*IF
 	}
 
 	if tokenResp.AccessToken == "" {
-		log.Debug(string(body))
+		// Security: Don't log response body as it may contain sensitive data
+		log.Debug("iflow token: response parsed but access token is empty")
 		return nil, fmt.Errorf("iflow token: missing access token in response")
 	}
 
@@ -191,7 +193,8 @@ func (ia *IFlowAuth) FetchUserInfo(ctx context.Context, accessToken string) (*us
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		log.Debugf("iflow api key failed: status=%d body=%s", resp.StatusCode, string(body))
+		// Security: Don't log response body as it may contain sensitive API keys
+		log.Debugf("iflow api key failed: status=%d", resp.StatusCode)
 		return nil, fmt.Errorf("iflow api key: %d %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 
@@ -373,7 +376,8 @@ func (ia *IFlowAuth) fetchAPIKeyInfo(ctx context.Context, cookie string) (*iFlow
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		log.Debugf("iflow cookie GET request failed: status=%d body=%s", resp.StatusCode, string(body))
+		// Security: Don't log response body as it may contain sensitive data
+		log.Debugf("iflow cookie GET request failed: status=%d", resp.StatusCode)
 		return nil, fmt.Errorf("iflow cookie: GET request failed with status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 
@@ -452,7 +456,8 @@ func (ia *IFlowAuth) RefreshAPIKey(ctx context.Context, cookie, name string) (*i
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		log.Debugf("iflow cookie POST request failed: status=%d body=%s", resp.StatusCode, string(body))
+		// Security: Don't log response body as it may contain sensitive data
+		log.Debugf("iflow cookie POST request failed: status=%d", resp.StatusCode)
 		return nil, fmt.Errorf("iflow cookie refresh: POST request failed with status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 

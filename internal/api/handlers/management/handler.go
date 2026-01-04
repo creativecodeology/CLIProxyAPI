@@ -5,6 +5,7 @@ package management
 import (
 	"crypto/subtle"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -89,6 +90,27 @@ func (h *Handler) SetLogDirectory(dir string) {
 	h.logDir = dir
 }
 
+// getRemoteIP extracts the IP address from a RemoteAddr string (host:port format).
+// This is used instead of ClientIP() to prevent IP spoofing via X-Forwarded-For headers.
+func getRemoteIP(remoteAddr string) string {
+	host, _, err := net.SplitHostPort(remoteAddr)
+	if err != nil {
+		// If there's no port, assume it's just an IP
+		return remoteAddr
+	}
+	return host
+}
+
+// isLoopbackIP checks if the given IP string represents a loopback address.
+// Returns true for 127.0.0.1, ::1, and other loopback addresses.
+func isLoopbackIP(ipStr string) bool {
+	ip := net.ParseIP(ipStr)
+	if ip == nil {
+		return false
+	}
+	return ip.IsLoopback()
+}
+
 // Middleware enforces access control for management endpoints.
 // All requests (local and remote) require a valid management key.
 // Additionally, remote access requires allow-remote-management=true.
@@ -101,8 +123,11 @@ func (h *Handler) Middleware() gin.HandlerFunc {
 		c.Header("X-CPA-COMMIT", buildinfo.Commit)
 		c.Header("X-CPA-BUILD-DATE", buildinfo.BuildDate)
 
-		clientIP := c.ClientIP()
-		localClient := clientIP == "127.0.0.1" || clientIP == "::1"
+		// Security: Use RemoteAddr instead of ClientIP() to prevent IP spoofing
+		// via X-Forwarded-For headers. This ensures localhost restrictions cannot
+		// be bypassed by header manipulation.
+		clientIP := getRemoteIP(c.Request.RemoteAddr)
+		localClient := isLoopbackIP(clientIP)
 		cfg := h.cfg
 		var (
 			allowRemote bool
